@@ -1,0 +1,196 @@
+# Increase in the injuries of football players overtime
+
+*Is the increase in playing time a cause for the increase in football injuries?*
+
+## Goal
+
+*To analyze athlete injury data over multiple seasons in order to determine whether the frequency and severity of injuries have increased over time.
+This project will involve data cleaning, aggregation, and visualization to uncover trends in injury counts, durations, and missed games, with the objective of informing decisions around player health, training practices, and risk management strategies.
+This analysis explores a dataset on injuries and demonstrates data loading, exploration, and visualization.*
+
+##Pre-analysis
+
+### Install and Load Required Packages
+
+
+```{r load-libraries-and-data eval=FALSE}
+install.packages("readxl")
+install.packages("dplyr")
+install.packages("ggplot2")
+install.packages("stringr")
+install.packages("lubridate")
+install.packages("forecast")
+install.packages("tseries")
+
+
+## Load required libraries
+library(readxl)
+library(dplyr)
+library(ggplot2)
+library(stringr)
+library(lubridate)
+library(forecast)
+library(tseries)
+```
+
+
+#### Read Excel file
+
+```{r}
+data <- read_excel("/Users/liev/Documents/Data Analysis Portfolio Datasets/InjuriesGoodDAta.xlsx")
+```
+
+
+#### Preview the data
+
+```{r}
+head(data)
+```
+## Data Cleaning & Validation Processes
+
+### Checking for missing or null data
+
+
+```{r}
+missing_found <- FALSE
+
+for (col in names(data)) {
+  missing_count <- sum(is.na(data[[col]]))
+  if (missing_count > 0) {
+    cat("Column", col, "has", missing_count, "missing values\n")
+    missing_found <- TRUE
+  }
+}
+
+if (!missing_found) {
+  cat("✅ Data is complete – no missing values found.\n")
+}
+```
+
+### Removing unnescessary date from rows 
+
+
+```{r}
+data_clean <- data %>%
+  mutate(
+    Days = str_remove(Days, " days"),
+    Days = as.numeric(Days)
+  )
+
+head(data_clean, 10)  
+```
+
+#### Data Analysis!
+
+In my analysis the goal was to show an increase in injuries over time, in both severity and frequency.
+
+### What is the trend in the injuries overtime?
+
+Let's visualize this
+```{r}
+# Convert the 'from' column to Date type
+data <- data %>%
+  mutate(from = as.Date(from, format = "%b %d, %Y"),
+         Year = year(from),
+         Month = month(from, label = TRUE))
+
+# Group by Year and Month
+yoY <- data %>%
+  group_by(Year, Month) %>%
+  summarise(Incidents = n())
+
+# Plot
+ggplot(yoY, aes(x = Month, y = Incidents, group = Year, color = as.factor(Year))) +
+  geom_line(size = 1.2) +
+  labs(title = "Year-over-Year Injury Trend",
+       x = "Month",
+       y = "Injuries",
+       color = "Year") +
+  theme_minimal()
+
+```
+
+Trend showing the monthly distribution of injuries overtime.
+```{r}
+data <- data %>%
+  mutate(
+    from = as.Date(from, format = "%b %d, %Y"),
+    Year = year(from),
+    Month = month(from, label = TRUE),
+    `Games missed` = as.numeric(`Games missed`)
+  )
+
+# Summarize games missed by year and month
+games_missed_summary <- data %>%
+  group_by(Year, Month) %>%
+  summarise(GamesMissed = sum(`Games missed`, na.rm = TRUE))
+
+# Plot it
+ggplot(games_missed_summary, aes(x = Month, y = GamesMissed, group = Year, color = as.factor(Year))) +
+  geom_line(size = 1.2) +
+  labs(title = "Games Missed Due to Injuries Over Time",
+       x = "Month",
+       y = "Games Missed",
+       color = "Year") +
+  theme_minimal()
+```
+### Is there an increase in the severity of injuries overtime?
+
+Lets visualize it 
+```{r}
+# Parse the date and ensure Games missed is numeric
+data <- data %>%
+  mutate(
+    from = as.Date(from, format = "%b %d, %Y"),
+    Year = year(from),
+    `Games missed` = as.numeric(`Games missed`)
+  )
+
+# Summarize total games missed per year
+yearly_missed <- data %>%
+  group_by(Year) %>%
+  summarise(TotalGamesMissed = sum(`Games missed`, na.rm = TRUE))
+
+# Plot the bar chart
+ggplot(yearly_missed, aes(x = as.factor(Year), y = TotalGamesMissed, fill = as.factor(Year))) +
+  geom_bar(stat = "identity", width = 0.7, show.legend = FALSE) +
+  labs(title = "Total Games Missed Per Year Due to Injuries",
+       x = "Year",
+       y = "Total Games Missed") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### What is the trend line for the total number of games missed per year?
+
+Let's visualize it
+```{r}
+
+data <- data %>%
+  mutate(
+    from = as.Date(from, format = "%b %d, %Y"),
+    Year = year(from),
+    `Games missed` = as.numeric(`Games missed`)
+  )
+
+# Aggregate total games missed per year
+yearly_missed <- data %>%
+  group_by(Year) %>%
+  summarise(TotalGamesMissed = sum(`Games missed`, na.rm = TRUE))
+
+# Plot with linear regression trendline
+ggplot(yearly_missed, aes(x = Year, y = TotalGamesMissed)) +
+  geom_bar(stat = "identity", fill = "#69b3a2", width = 0.7) +
+  geom_smooth(method = "lm", se = TRUE, color = "red", linetype = "dashed", size = 1.2) +
+  labs(title = "Total Games Missed Per Year with Trendline",
+       x = "Year",
+       y = "Total Games Missed") +
+  theme_minimal()
+
+```
+
+## Conclusion
+
+Overtime there has been an increase in both the frequency and the amount of injuries overtime, with peak during the covid months. There is peak injury months of August when the season starts and another big spike during the middle of the first half of the season, which is in October.
+
+Overall, my R data analysis project provided valuable insights into the frequency and injury severity of footballer overtime.
