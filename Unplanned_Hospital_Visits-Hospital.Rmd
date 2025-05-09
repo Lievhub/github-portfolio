@@ -1,0 +1,206 @@
+---
+title: "Readmission Prediction"
+author: "Liev Serieux"
+date: "2025-05-01"
+output: html_document
+---
+
+## Predicting Hospital Readmission Rates Using CMS Data
+
+Readmission to the hospital is one of the most important indicators of healthcare quality and patient outcomes. High readmission rates not only strain healthcare systems but also indicate potential deficiencies in care continuity, discharge planning, or follow-up with patients. For this project, I analyzed publicly available hospital performance data from the Centers for Medicare & Medicaid Services (CMS) to develop a predictive model for unplanned hospital readmission rates.
+
+The goal of this project is to use real hospital-level data to make predictions about hospital readmission rates based on variables of hospital type, ownership, presence of emergency services, and patient volume. Along the way, I demonstrate the steps of data cleansing, feature engineering, and machine learning modeling in R, while addressing real-world data issues such as missing values and categorical predictors.
+
+This case study offers insight into how predictive modeling can support public health decisions and drive improvements in hospital performance by identifying high-risk facilities for targeted intervention.
+
+##Pre-analysis
+
+### Load Required Packages
+
+```{r setup, include=FALSE, warning=FALSE, message=FALSE}
+
+options(repos = c(CRAN = "https://cran.rstudio.com"))
+
+packages <- c("readr", "ggplot2", "dplyr", "caret", "ranger", "Metrics", "janitor", "stringr")
+new_pkgs <- packages[!(packages %in% installed.packages()[, "Package"])]
+if(length(new_pkgs)) install.packages(new_pkgs)
+
+# Load libraries
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(caret)
+library(ranger)
+library(Metrics)
+library(janitor)
+library(stringr)
+
+```
+
+#### Read Excel file
+
+```{r, , warning=FALSE}
+data <- read_csv("/Users/liev/Downloads/Unplanned_Hospital_Visits-Hospital.csv", show_col_types = FALSE)
+```
+
+#### Preview the data
+
+```{r}
+head(data)
+```
+### Cleaning the data from the columns for future analysis
+
+In the data cleaning stage, I converted string-based missing values like 'Not Available' to NA, standardized categorical variables, and converted key columns such as readmission score and sample size to numeric types. This ensured the data was ready for analysis and modeling.
+
+```{r}
+
+# Replace 'Not Available' with NA and convert to numeric
+
+data <- data %>%
+  mutate(
+    score_numeric = as.numeric(ifelse(Score %in% c("Not Available", "Not Applicable"), NA, Score)),
+    measure_id = as.factor(`Measure ID`),
+    county_parish = as.factor(`County/Parish`),
+    sample_numeric = as.numeric(ifelse(Denominator %in% c("Not Available", "Not Applicable"), NA, Denominator)),
+    lower_numeric = as.numeric(ifelse(`Lower Estimate` %in% c("Not Available", "Not Applicable"), NA, `Lower Estimate`)),
+    higher_numeric = as.numeric(ifelse(`Higher Estimate` %in% c("Not Available", "Not Applicable"), NA, `Higher Estimate`))
+  ) %>%
+  filter(!is.na(score_numeric), !is.na(measure_id),
+       # !is.na(facility_name),
+        !is.na(county_parish), 
+         !is.na(sample_numeric), !is.na(lower_numeric), !is.na(higher_numeric))
+
+```
+
+## Fix formatting issues to ensure a consistent format
+
+```{r}
+data$`Facility Name` <- str_trim(data$`Facility Name`)
+data$`City/Town` <- str_trim(data$`City/Town`)
+data$`County/Parish` <- str_trim(data$`County/Parish`)
+data$`State` <- str_trim(data$`State`)
+```
+### Modelling Readmission rates
+
+### Train/ Test Split
+
+To evaluate how well the model performs on unseen data, I split the dataset into training and testing sets. This prevents overfitting and gives a more realistic estimate of predictive performance in real-world scenarios.
+
+### Summary of Modeling 
+
+To validate my predictive model, I split the dataset into training (80%) and test (20%) sets. This allowed me to evaluate the model's ability to generalize to unseen data and avoid overfitting. I used stratified sampling to ensure the readmission rate distribution remained balanced.
+
+```{r}
+library(caret)
+
+set.seed(123)
+train_index <- createDataPartition(data$score_numeric, p = 0.8, list = FALSE)
+train <- data[train_index, ]
+test <- data[-train_index, ]
+```
+
+### Ranger Model
+
+In this project, my dataset included variables with many unique categories (e.g., measure_id, facility_name, county_parish). The standard randomForest package in R fails when a categorical feature has more than 53 levels. To overcome this limitation, I used the ranger package which is suited for the cardinality of the columns.
+
+```{r}
+model <- ranger(score_numeric ~ measure_id
+                + county_parish +
+                  sample_numeric + lower_numeric + higher_numeric,
+                data = train,
+                importance = "impurity",
+                num.trees = 500)
+
+predictions <- predict(model, data = test)$predictions
+```
+
+To test the accurately the model predicts hospital readmission rates by calculating three key performance metrics.
+```{r}
+library(Metrics)
+
+mae_val <- mae(test$score_numeric, predictions)
+rmse_val <- rmse(test$score_numeric, predictions)
+r2_val <- 1 - sum((test$score_numeric - predictions)^2) / sum((test$score_numeric - mean(test$score_numeric))^2)
+
+cat("MAE:", mae_val, "\n")
+cat("RMSE:", rmse_val, "\n")
+cat("R-squared:", r2_val, "\n")
+```
+
+This code identifies which features had the greatest impact on the model's ability to predict hospital readmission rates. Understanding feature importance is critical for model interpretation, stakeholder communication, and guiding future data collection efforts.
+
+```{r}
+importance_df <- data.frame(Feature = names(model$variable.importance),
+                            Importance = model$variable.importance)
+
+importance_df <- importance_df %>%
+  arrange(desc(Importance))
+
+print(importance_df)
+```
+This code creates a horizontal bar chart to visually communicate which features contributed most to the accuracy of the hospital readmission rate model. While numerical importance scores are useful, visualizing them helps quickly highlight the most influential variables — which is essential for both technical stakeholders and broader audiences.
+
+```{r}
+importance_df <- data.frame(
+  Feature = c("lower_numeric", "higher_numeric", "measure_id", "sample_numeric", "county_parish"),
+  Importance = c(2111438.204, 1625325.101, 393513.786, 51394.319, 7158.136)
+)
+
+library(ggplot2)
+
+# Plot
+ggplot(importance_df, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(
+    title = "Feature Importance in Predicting Readmission Rates",
+    x = "Feature",
+    y = "Importance Score"
+  ) +
+  theme_minimal()
+```
+
+This visualization helps identify which types of medical care or procedures are associated with higher or more variable readmission rates. Understanding these patterns can inform targeted interventions and resource planning in healthcare settings.
+
+```{r}
+ggplot(train, aes(x = reorder(measure_id, score_numeric, FUN = median), y = score_numeric)) +
+  geom_boxplot(fill = "lightblue") +
+  coord_flip() +
+  labs(
+    title = "Distribution of Readmission Rates by Care Category",
+    x = "Measure ID (Category)",
+    y = "Readmission Rate"
+  ) +
+  theme_minimal()
+```
+
+This visualization explores the relationship between the width of the confidence interval (CI) around the predicted readmission score and the score itself. The CI width is a proxy for data certainty: narrower intervals imply more reliable measurements, while wider ones may indicate uncertainty or variability in hospital performance reporting.
+
+
+```{r}
+train$ci_width <- train$higher_numeric - train$lower_numeric
+
+ggplot(train, aes(x = ci_width, y = score_numeric)) +
+  geom_point(alpha = 0.5, color = "purple") +
+  geom_smooth(method = "lm", se = FALSE, color = "black") +
+  labs(
+    title = "Readmission Score vs Confidence Interval Width",
+    x = "CI Width (Higher - Lower)",
+    y = "Readmission Score"
+  ) +
+  theme_minimal()
+```
+
+This visualization highlights how hospital readmission rates vary across U.S. states. It helps identify geographic patterns in healthcare quality, potentially influenced by state-level factors such as policy, funding, or population health.
+
+```{r}
+ggplot(train, aes(x = reorder(State, score_numeric, FUN = mean), y = score_numeric)) +
+  geom_boxplot(fill = "lightgreen") +
+  coord_flip() +
+  labs(
+    title = "Readmission Rates by State",
+    x = "State",
+    y = "Readmission Rate"
+  ) +
+  theme_minimal()
+```
